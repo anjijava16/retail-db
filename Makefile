@@ -1,6 +1,6 @@
 SRC_DIR=src
 BUILD_DIR=build
-CREATE_FILES=$(SRC_DIR)/schema.sql
+CREATE_FILES=$(SRC_DIR)/relations.sql $(SRC_DIR)/constraints.sql
 CLEAR_FILES=$(SRC_DIR)/clear.sql
 
 # Targets & dependencies

@@ -1,6 +1,6 @@
 SRC_DIR=src
 BUILD_DIR=build
-CREATE_FILES=$(SRC_DIR)/schema.sql $(SRC_DIR)/functions.sql $(SRC_DIR)/constraints.sql $(SRC_DIR)/fixtures.sql
+CREATE_FILES=$(SRC_DIR)/schema.sql $(SRC_DIR)/functions.sql $(SRC_DIR)/constraints.sql $(SRC_DIR)/views.sql $(SRC_DIR)/fixtures.sql
 CLEAR_FILES=$(SRC_DIR)/clear.sql
 SCHEMACRAWLER_DIR=~/Pobrane/schemacrawler-12.06.03-main/_schemacrawler
 

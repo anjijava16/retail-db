@@ -1,8 +1,9 @@
 SRC_DIR=src
 BUILD_DIR=build
-CREATE_FILES=$(SRC_DIR)/schema.sql $(SRC_DIR)/functions.sql $(SRD_DIR)/constraints.sql $(SRC_DIR)/fixtures.sql
+CREATE_FILES=$(SRC_DIR)/schema.sql $(SRC_DIR)/functions.sql $(SRC_DIR)/constraints.sql $(SRC_DIR)/fixtures.sql
 CLEAR_FILES=$(SRC_DIR)/clear.sql
 SCHEMACRAWLER_DIR=~/Pobrane/schemacrawler-12.06.03-main/_schemacrawler
+
 # Targets & dependencies
 
 all: $(BUILD_DIR)/create.sql $(BUILD_DIR)/clear.sql $(BUILD_DIR)/README.txt $(BUILD_DIR)/diagram.png

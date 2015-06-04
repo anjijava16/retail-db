@@ -66,10 +66,50 @@ ALTER TABLE CLIENT ADD FOREIGN KEY(DEFAULT_BILLING_ADDRESS_ID) REFERENCES CLIENT
 CREATE TABLE CATEGORY (
 	CATEGORY_ID SERIAL PRIMARY KEY,
 	PARENT_ID INTEGER REFERENCES CATEGORY(CATEGORY_ID),
+	NAME VARCHAR(255) NOT NULL
 	NAME VARCHAR(255) NOT NULL,
 	VAT NUMERIC(3,2) NOT NULL DEFAULT 0
-	-- TODO: checking for cycles on UPDATE
 );
+
+--------------------------------------------------
+--	Trigger for detecting cycle presence		--
+
+CREATE OR REPLACE FUNCTION category_find_cycles() RETURNS trigger AS
+$$
+
+	DECLARE
+
+		cr	INTEGER;	--	variable to traverse category
+
+	BEGIN
+
+		cr = NEW.PARENT_ID;
+		WHILE (cr IS NOT NULL) LOOP
+			IF (cr = NEW.CATEGORY_ID) THEN
+				RAISE EXCEPTION 'Cycle in categories detected. Violated by %.', NEW.NAME;
+			ELSE
+				SELECT PARENT_ID INTO cr FROM CATEGORY WHERE CATEGORY_ID = cr;
+			END IF;
+		END LOOP;
+		--	Reached the end - OK
+		RETURN NEW;
+	
+	END
+
+$$	LANGUAGE plpgsql;
+
+--------------------------------------------------
+
+CREATE TRIGGER category_cycle_insert BEFORE INSERT ON CATEGORY
+FOR EACH ROW WHEN (NEW.PARENT_ID IS NOT NULL)
+EXECUTE PROCEDURE category_find_cycles();
+-- Inefficient for inserts (because the only forbidden case is self-reference)
+
+CREATE TRIGGER category_cycle_update BEFORE UPDATE ON CATEGORY
+FOR EACH ROW WHEN (NEW.PARENT_ID IS DISTINCT FROM OLD.PARENT_ID)
+EXECUTE PROCEDURE category_find_cycles();
+
+--------------------------------------------------
 
 CREATE TABLE PRODUCT (
 	PRODUCT_ID SERIAL PRIMARY KEY,

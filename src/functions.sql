@@ -117,12 +117,10 @@ SELECT
 FROM product_price p;
 
 --
--- Function returning information about order.
--- Fetching the discounts is ugly but works (under assumption that validity
--- of said discounts is guaranteed by order-coupon relation)
+-- Function returning detailed listing of products within order
 --
 
-CREATE OR REPLACE FUNCTION order_information(id INTEGER) RETURNS 
+CREATE OR REPLACE FUNCTION order_products(id INTEGER) RETURNS 
 TABLE
 (
 	no             BIGINT,
@@ -165,6 +163,40 @@ $$
 LANGUAGE sql;
 
 --
+-- Order information
+--
+CREATE OR REPLACE FUNCTION order_information(id INTEGER) RETURNS 
+TABLE
+(
+	no             BIGINT,
+	name           VARCHAR(128),
+	quantity       INTEGER,
+	unit_price     NUMERIC(6,2),
+	total_price    NUMERIC(6,2),
+	unit_weight    NUMERIC(6,2),
+	total_weight   NUMERIC(6,2),
+	DISCOUNT       NUMERIC(3,2)
+)
+AS
+$$
+	SELECT * FROM order_products(id)
+	UNION
+	SELECT
+		NULL,
+		st.name,
+		1,
+		st.cost,
+		st.cost,
+		NULL,
+		NULL,
+		NULL
+	FROM "order"
+	JOIN shipment_type st USING (shipment_type_id)
+	WHERE order_id = id
+	ORDER BY 1;
+$$
+LANGUAGE sql;
+--
 -- Coupon validity
 --
 
@@ -174,6 +206,19 @@ DECLARE
 	c RECORD;
 BEGIN
 	SELECT * FROM coupon WHERE coupon_id=c_id INTO c;
+	
+	IF c.claim_limit <= (SELECT COUNT(*) FROM order_coupon WHERE coupon_id=c.coupon_id) THEN
+		RAISE EXCEPTION 'Coupon "%" has exceeded claim limit.', c_id;
+	END IF;
+	
+	IF NOT EXISTS (
+		SELECT * FROM "order"
+		WHERE
+			"order".order_id=o_id AND
+			created_at BETWEEN c.VALID_FROM AND
+			c.VALID_TO
+		) THEN RAISE EXCEPTION 'Coupon "%" has expired.', c_id;
+	END IF;
 	
 	IF c.client_id IS NOT NULL THEN
 		IF NOT EXISTS (
@@ -205,15 +250,6 @@ BEGIN
 				product_id=c.product_id
 			) THEN RAISE EXCEPTION 'Coupon "%" cannot be applied to this order.', c_id;
 		END IF;
-	END IF;
-	
-	IF NOT EXISTS (
-		SELECT * FROM "order"
-		WHERE
-			"order".order_id=o_id AND
-			created_at BETWEEN c.VALID_FROM AND
-			c.VALID_TO
-		) THEN RAISE EXCEPTION 'Coupon "%" has expired.', c_id;
 	END IF;
 END
 $$
@@ -375,6 +411,32 @@ $$
 LANGUAGE plpgsql;
 
 --
+-- Function that checks if shipping method is suitable for the order
+--
+
+CREATE OR REPLACE FUNCTION order_shipment_check() RETURNS TRIGGER AS
+$$
+DECLARE
+	total_weight NUMERIC(6,2);
+	total_price  NUMERIC(6,2);
+BEGIN
+	SELECT SUM(o.total_weight) FROM order_products(NEW.order_id) o INTO total_weight;
+	SELECT SUM(o.total_price) FROM order_products(NEW.order_id) o INTO total_price;
+
+	IF NOT EXISTS (
+		SELECT * FROM shipment_type
+		WHERE
+			shipment_type_id=NEW.shipment_type_id AND
+			(min_order_value IS NULL OR min_order_value <= total_price) AND
+			(max_weight IS NULL OR max_weight >= total_weight)
+		) THEN RAISE EXCEPTION 'Shipment type #% is unsuitable for order #%', NEW.shipment_type_id, NEW.order_id;
+	END IF;
+	RETURN NEW;
+END
+$$
+LANGUAGE plpgsql;
+
+--
 -- Function that updates product stock when order changes
 --
 
@@ -428,6 +490,63 @@ BEGIN
 				EXIT;
 			END IF;
 		END LOOP;
+	END IF;
+	
+	RETURN NEW;
+END
+$$
+LANGUAGE plpgsql;
+
+--
+-- Function that checks if a given product has price
+--
+
+CREATE OR REPLACE FUNCTION product_has_price() RETURNS TRIGGER AS
+$$
+BEGIN
+	IF TG_OP='INSERT' THEN
+		IF NOT EXISTS (SELECT * FROM product_price WHERE product_id=NEW.product_id) THEN
+			RAISE EXCEPTION 'Product #% (%) has no price.', NEW.product_id, (SELECT name FROM product WHERE product_id=NEW.product_id);
+		END IF;
+		RETURN NEW;
+	ELSIF TG_OP='DELETE' OR TG_OP='UPDATE' THEN
+		IF EXISTS (SELECT * FROM product WHERE product_id=OLD.product_id) THEN
+			IF NOT EXISTS (SELECT * FROM product_price WHERE product_id=OLD.product_id) THEN
+				RAISE EXCEPTION 'Product #% (%) has no price.', OLD.product_id, (SELECT name FROM product WHERE product_id=OLD.product_id);
+			END IF;
+		END IF;
+		RETURN OLD;
+	END IF;
+END
+$$
+LANGUAGE plpgsql;
+
+--
+-- Function that checks if inserting/altering product price influences existing data (i.e. orders)
+--
+
+CREATE OR REPLACE FUNCTION price_sequence_point() RETURNS TRIGGER AS
+$$
+DECLARE
+	next RECORD;
+	current RECORD;
+BEGIN
+	IF TG_OP='INSERT' OR TG_OP='UPDATE' THEN
+		current := NEW;
+	ELSIF TG_OP='DELETE' THEN
+		current := OLD;
+	END IF;
+	
+	SELECT * FROM product_price WHERE product_id=current.product_id AND created_at > current.created_at AND created_at <= ALL (SELECT created_at FROM product_price WHERE product_id=current.product_id AND created_at > current.created_at) INTO next;
+
+	IF EXISTS (
+		SELECT * FROM "order"
+		JOIN order_product USING (order_id)
+		WHERE
+			product_id  = current.product_id AND
+			created_at >= current.created_at AND
+			(next.created_at IS NULL OR next.created_at > created_at)
+		) THEN RAISE EXCEPTION 'Could not change price for product #% due to possible data disintegration', current.product_id;
 	END IF;
 	
 	RETURN NEW;

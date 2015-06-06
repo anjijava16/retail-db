@@ -49,3 +49,22 @@ FOR EACH ROW EXECUTE PROCEDURE order_address_check();
 -- update product stock information
 CREATE CONSTRAINT TRIGGER order_quantity_update AFTER INSERT OR UPDATE OR DELETE ON order_product
 DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE PROCEDURE order_quantity_check();
+
+-- make sure shipping method is suitable for the order
+CREATE CONSTRAINT TRIGGER order_shipment_check AFTER INSERT OR UPDATE ON "order"
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE PROCEDURE order_shipment_check();
+
+--
+-- Triggers validating products
+--
+
+-- product must have at least one price
+CREATE CONSTRAINT TRIGGER product_has_price AFTER INSERT ON product
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE PROCEDURE product_has_price();
+
+CREATE CONSTRAINT TRIGGER product_has_price AFTER UPDATE OR DELETE ON product_price
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE PROCEDURE product_has_price();
+
+-- inserting/updating/deleting prices that change values of existing orders is forbidden
+CREATE CONSTRAINT TRIGGER price_sequence_point AFTER INSERT OR UPDATE OR DELETE ON product_price
+FOR EACH ROW EXECUTE PROCEDURE price_sequence_point();

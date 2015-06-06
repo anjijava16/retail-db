@@ -78,14 +78,14 @@ CREATE TABLE product (
 );
 
 CREATE TABLE product_price (
-	product_id INTEGER NOT NULL REFERENCES product(product_id),
+	product_id INTEGER NOT NULL REFERENCES product(product_id) ON DELETE CASCADE,
 	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL default NOW(),
 	price NUMERIC(6,2) NOT NULL,
 	PRIMARY KEY(product_id, created_at)
 );
 
 CREATE TABLE product_stock (
-	product_id INTEGER NOT NULL REFERENCES product(product_id),
+	product_id INTEGER NOT NULL REFERENCES product(product_id) ON DELETE CASCADE,
 	branch_id INTEGER NOT NULL REFERENCES branch(branch_id),
 	quantity INTEGER NOT NULL,
 	PRIMARY KEY (product_id, branch_id)

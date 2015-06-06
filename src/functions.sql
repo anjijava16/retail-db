@@ -167,6 +167,7 @@ LANGUAGE sql;
 --
 -- Coupon validity
 --
+
 CREATE OR REPLACE FUNCTION order_coupon_validate(o_id INTEGER, c_id VARCHAR(128)) RETURNS VOID AS
 $$
 DECLARE
@@ -221,6 +222,7 @@ language plpgsql;
 --
 -- Trigger validating inserts in order_coupon relation
 --
+
 CREATE OR REPLACE FUNCTION order_coupon_validate_trigger() RETURNS TRIGGER AS
 $$
 BEGIN
@@ -233,6 +235,7 @@ language plpgsql;
 --
 -- Clean unused coupon entries when removing products from order
 --
+
 CREATE OR REPLACE FUNCTION order_coupon_after_order_product_delete() RETURNS TRIGGER AS
 $$
 DECLARE
@@ -251,27 +254,183 @@ $$
 language plpgsql;
 
 --
--- View that shows current state of each employee
+-- View that shows detailed state of each employee
 --
+
 CREATE OR REPLACE VIEW employee_detail AS
-SELECT * FROM employee
-JOIN employee_position USING (employee_id)
-JOIN position USING (position_id)
-WHERE since >= ALL (SELECT since FROM employee_position X WHERE X.employee_id=employee_id);
+SELECT 
+	*,
+	(
+		SELECT MIN(since) FROM employee_position WHERE employee_id=e.employee_id AND since > ep.since
+	) as until
+FROM employee e
+JOIN employee_position ep USING (employee_id)
+JOIN position USING (position_id);
+
 --
 -- Function that finds the best store and seller to be assigned to the given order
 --
-CREATE OR REPLACE FUNCTION find_best_seller(order_id INTEGER) RETURNS INTEGER AS
+
+CREATE OR REPLACE FUNCTION find_best_salesman(o_id INTEGER) RETURNS INTEGER AS
 $$
+DECLARE
+	ord RECORD;
+	emp INTEGER;
+BEGIN
+	SELECT * FROM "order" WHERE order_id=o_id INTO ord;
+	
 	SELECT employee_id FROM order_product
 	JOIN product_price USING (product_id)
 	JOIN product USING (product_id)
 	JOIN product_stock USING (product_id)
-	JOIN employee_detail USING (branch_id)
-	-- TODO: join employee's order and count them into result
-	WHERE order_id=1
+	JOIN employee_detail ed USING (branch_id)
+	LEFT JOIN "order" ON ("order".salesman_id=employee_id)
+	WHERE
+		order_product.order_id=o_id AND
+		ed.salesman=TRUE AND
+		ord.created_at BETWEEN ed.since AND coalesce(ed.until, NOW())
 	GROUP BY employee_id
-	ORDER BY sum(weight * least(order_product.quantity, product_stock.quantity))
-	LIMIT 1;
+	ORDER BY
+		sum(weight * least(order_product.quantity, product_stock.quantity)) DESC,
+		count("order")
+	FETCH FIRST ROW ONLY INTO emp;
+	
+	IF emp IS NULL THEN
+		RAISE EXCEPTION 'Could not find a suitable salesman.';
+	END IF;
+	
+	RETURN emp;
+END
 $$
-language sql;
+LANGUAGE plpgsql;
+
+--
+-- Function that checks for a salesman presence in order
+--
+
+CREATE OR REPLACE FUNCTION order_not_null_salesman() RETURNS TRIGGER AS
+$$
+BEGIN
+	IF NEW.salesman_id IS NULL THEN
+		SELECT find_best_salesman(NEW.order_id) INTO NEW.salesman_id;
+		UPDATE "order" SET salesman_id=NEW.salesman_id WHERE order_id=NEW.order_id;
+		RAISE NOTICE 'Order #% has been assigned automatically salesman #%', NEW.order_id, NEW.salesman_id;
+	ELSIF NOT EXISTS (SELECT * FROM employee_detail ed WHERE salesman=TRUE AND NEW.created_at BETWEEN ed.since AND coalesce(ed.until, NOW())) THEN
+		RAISE EXCEPTION 'Order #% has been assigned an employee who is not a salesman.', NEW.order_id;
+	END IF;
+	
+	RETURN NEW;
+END
+$$
+LANGUAGE plpgsql;
+
+--
+-- Function that checks whether given order has enough > 0 products
+--
+
+CREATE OR REPLACE FUNCTION order_nonempty_cart() RETURNS TRIGGER AS
+$$
+BEGIN
+	IF (TG_OP='UPDATE' OR TG_OP='DELETE') AND OLD.order_id IS NOT NULL THEN
+		IF NOT EXISTS (SELECT * FROM order_product WHERE order_id=OLD.order_id) THEN
+			RAISE EXCEPTION 'Order #% is missing products.', OLD.order_id;
+		END IF;
+	END IF;
+	IF TG_OP='INSERT' AND NEW.order_id IS NOT NULL THEN
+		IF NOT EXISTS (SELECT * FROM order_product WHERE order_id=NEW.order_id) THEN
+			RAISE EXCEPTION 'Order #% is missing products.', NEW.order_id;
+		END IF;
+	END IF;
+	RETURN NEW;
+END
+$$
+LANGUAGE plpgsql;
+
+--
+-- Function that checks if order shipping/billing address belong to the client
+--
+
+CREATE OR REPLACE FUNCTION order_address_check() RETURNS TRIGGER AS
+$$
+BEGIN
+	IF NOT EXISTS (
+		SELECT * FROM client_address
+		WHERE client_address_id=NEW.shipping_address_id AND
+		client_id=NEW.client_id
+		) THEN RAISE EXCEPTION 'Order #% shipping address does not belong to the client.', NEW.order_id;
+	END IF;
+
+	IF NEW.billing_address_id IS NOT NULL THEN
+		IF NOT EXISTS (
+			SELECT * FROM client_address
+			WHERE client_address_id=NEW.billing_address_id AND
+			client_id=NEW.client_id
+			) THEN RAISE EXCEPTION 'Order #% billing address does not belong to the client.', NEW.order_id;
+		END IF;
+	END IF;
+	
+	RETURN NEW;
+END
+$$
+LANGUAGE plpgsql;
+
+--
+-- Function that updates product stock when order changes
+--
+
+CREATE OR REPLACE FUNCTION order_quantity_check() RETURNS TRIGGER AS
+$$
+DECLARE
+	b_id            INTEGER;
+	available_units INTEGER;
+	required_units  INTEGER;
+	stock           RECORD;
+BEGIN
+	-- return items to default store
+	IF TG_OP='DELETE' OR TG_OP='UPDATE' THEN
+		SELECT branch_id FROM "order"
+			JOIN employee_detail ed ON (employee_id=salesman_id)
+			JOIN "order" ord USING (order_id)
+			WHERE
+				order_id=OLD.order_id AND
+				ord.created_at BETWEEN ed.since AND coalesce(ed.until, NOW())
+			INTO b_id;
+		
+		UPDATE product_stock SET quantity=quantity+OLD.quantity WHERE product_id=OLD.product_id AND branch_id=b_id;
+	END IF;
+	
+	-- try to get items from stores
+	IF TG_OP='INSERT' OR TG_OP='UPDATE' THEN
+		SELECT branch_id FROM "order"
+			JOIN employee_detail ed ON (employee_id=salesman_id)
+			JOIN "order" ord USING (order_id)
+			WHERE
+				order_id=NEW.order_id AND
+				ord.created_at BETWEEN ed.since AND coalesce(ed.until, NOW())
+			INTO b_id;
+
+		-- count if it is possible to meet the quantity requirement
+		SELECT SUM(quantity) FROM product_stock WHERE product_id=NEW.product_id INTO available_units;
+		IF available_units < NEW.quantity THEN
+			RAISE EXCEPTION 'Missing % units of product #% (%) in stores', NEW.quantity-available_units, NEW.product_id, (SELECT name FROM product WHERE product_id=NEW.product_id);
+		END IF;
+		
+		required_units := NEW.quantity;
+		FOR stock IN SELECT * FROM product_stock WHERE product_id=NEW.product_id ORDER BY NULLIF(branch_id, b_id) NULLS FIRST, quantity DESC
+		LOOP
+			UPDATE product_stock SET quantity=GREATEST(0, quantity-required_units)
+			WHERE
+				branch_id=stock.branch_id AND
+				product_id=NEW.product_id;
+
+			required_units := required_units - LEAST(stock.quantity, required_units);
+			IF required_units = 0 THEN
+				EXIT;
+			END IF;
+		END LOOP;
+	END IF;
+	
+	RETURN NEW;
+END
+$$
+LANGUAGE plpgsql;

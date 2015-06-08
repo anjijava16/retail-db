@@ -117,13 +117,13 @@ CREATE TABLE coupon (
 
 CREATE TABLE "order" (
 	order_id SERIAL PRIMARY KEY,
-	client_id INTEGER NOT NULL REFERENCES client(client_id),
+	client_id INTEGER REFERENCES client(client_id),
 	billing_address_id INTEGER REFERENCES client_address(client_address_id),
 	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL default NOW(),
 	salesman_id INTEGER REFERENCES employee(employee_id),
 	paid BOOLEAN NOT NULL default FALSE,
-	shipment_type_id INTEGER NOT NULL REFERENCES shipment_type(shipment_type_id),
-	shipping_address_id INTEGER NOT NULL REFERENCES client_address(client_address_id),
+	shipment_type_id INTEGER REFERENCES shipment_type(shipment_type_id),
+	shipment_address_id INTEGER REFERENCES client_address(client_address_id),
 	shipped_at TIMESTAMP WITHOUT TIME ZONE,
 	tracking VARCHAR(128)
 );

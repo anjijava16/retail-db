@@ -113,8 +113,10 @@ SELECT
 	p.*,
 	(
 		SELECT MIN(created_at) FROM product_price WHERE product_id=p.product_id AND created_at > p.created_at
-	) as ends_at
-FROM product_price p;
+	) as ends_at,
+	(p.price/product.weight)::NUMERIC(6,2) as price_per_kg
+FROM product_price p
+JOIN product USING (product_id);
 
 --
 -- Function returning detailed listing of products within order
@@ -383,17 +385,19 @@ $$
 LANGUAGE plpgsql;
 
 --
--- Function that checks if order shipping/billing address belong to the client
+-- Function that checks if order shipment/billing address belong to the client
 --
 
 CREATE OR REPLACE FUNCTION order_address_check() RETURNS TRIGGER AS
 $$
 BEGIN
-	IF NOT EXISTS (
-		SELECT * FROM client_address
-		WHERE client_address_id=NEW.shipping_address_id AND
-		client_id=NEW.client_id
-		) THEN RAISE EXCEPTION 'Order #% shipping address does not belong to the client.', NEW.order_id;
+	IF NEW.shipment_address_id IS NOT NULL THEN
+		IF NOT EXISTS (
+			SELECT * FROM client_address
+			WHERE client_address_id=NEW.shipment_address_id AND
+			client_id=NEW.client_id
+			) THEN RAISE EXCEPTION 'Order #% shipment address does not belong to the client.', NEW.order_id;
+		END IF;
 	END IF;
 
 	IF NEW.billing_address_id IS NOT NULL THEN
@@ -411,7 +415,8 @@ $$
 LANGUAGE plpgsql;
 
 --
--- Function that checks if shipping method is suitable for the order
+-- Function that checks if shipment method is suitable for the order
+-- and whether order contains required information (shipping address)
 --
 
 CREATE OR REPLACE FUNCTION order_shipment_check() RETURNS TRIGGER AS
@@ -420,6 +425,18 @@ DECLARE
 	total_weight NUMERIC(6,2);
 	total_price  NUMERIC(6,2);
 BEGIN
+	IF NEW.shipment_type_id IS NULL THEN
+		IF NEW.shipment_address_id IS NOT NULL THEN
+			RAISE EXCEPTION 'Order #%: shipment address set but order is not meant to be shipped.', NEW.order_id;
+		END IF;
+
+		RETURN NEW;
+	END IF;
+
+	IF NEW.shipment_address_id IS NULL THEN
+		RAISE EXCEPTION 'Order #%: shipment address is required', NEW.order_id;
+	END IF;
+
 	SELECT SUM(o.total_weight) FROM order_products(NEW.order_id) o INTO total_weight;
 	SELECT SUM(o.total_price) FROM order_products(NEW.order_id) o INTO total_price;
 

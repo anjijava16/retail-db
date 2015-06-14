@@ -156,3 +156,29 @@ CREATE OR REPLACE VIEW salesman_achievements AS
 	GROUP BY e.employee_id
 	ORDER BY 1;
 
+------------------------------------------------------------
+-- Pretty print of category tree
+------------------------------------------------------------
+
+CREATE OR REPLACE VIEW category_detail AS
+	SELECT
+		c.category_id,
+		(SELECT array_to_string(array(SELECT name FROM category_ancestors(c.category_id)), '/')) breadcrumb
+	FROM category c;
+
+------------------------------------------------------------
+-- Detailed information about branches
+------------------------------------------------------------
+
+CREATE OR REPLACE VIEW branch_detail AS
+	SELECT
+		b.*,
+		COALESCE((SELECT COUNT(*) FROM employee_detail ed WHERE ed.branch_id=b.branch_id), 0) as employee_count,
+		SUM(COALESCE((SELECT SUM(total_price) FROM order_products(o.order_id) WHERE o.created_at >= (NOW() - interval '7 days')), 0)) AS last_7_days_income,
+		SUM(COALESCE((SELECT SUM(total_price) FROM order_products(o.order_id) WHERE o.created_at >= (NOW() - interval '30 days')), 0)) AS last_30_days_income,
+		SUM(COALESCE((SELECT SUM(total_price) FROM order_products(o.order_id) WHERE o.created_at >= (NOW() - interval '1 year')), 0)) AS last_1_year_income
+	FROM branch b
+	LEFT OUTER JOIN employee_position ep ON (b.branch_id=ep.branch_id)
+	LEFT OUTER JOIN "order" o ON (o.salesman_id=ep.employee_id)
+	GROUP BY b.branch_id
+	ORDER BY 1;

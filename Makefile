@@ -2,7 +2,7 @@ SRC_DIR=src
 BUILD_DIR=build
 CREATE_FILES=$(SRC_DIR)/schema.sql $(SRC_DIR)/functions.sql $(SRC_DIR)/constraints.sql $(SRC_DIR)/views.sql $(SRC_DIR)/fixtures.sql
 CLEAR_FILES=$(SRC_DIR)/clear.sql
-SCHEMACRAWLER_DIR=~/Pobrane/schemacrawler-12.06.03-main/_schemacrawler
+#SCHEMACRAWLER_DIR=~/Pobrane/schemacrawler-12.06.03-main/_schemacrawler
 
 # Targets & dependencies
 
@@ -17,8 +17,8 @@ deploy: $(BUILD_DIR)/create.sql $(BUILD_DIR)/clear.sql
 clean:
 	rm -rf $(BUILD_DIR)
 
-gendiagram: $(BUILD_DIR)/create.sql
-	java -cp $$(echo $(SCHEMACRAWLER_DIR)/lib/*.jar | tr ' ' ':') schemacrawler.Main -server=postgresql -user=${USER} -database=${USER} -infolevel=standard -command=graph -outputformat=png -outputfile=$(SRC_DIR)/diagram.png
+#gendiagram: $(BUILD_DIR)/create.sql
+#	java -cp $$(echo $(SCHEMACRAWLER_DIR)/lib/*.jar | tr ' ' ':') schemacrawler.Main -server=postgresql -user=${USER} -database=${USER} -infolevel=standard -command=graph -outputformat=png -outputfile=$(SRC_DIR)/diagram.png
 
 # Instructions
 

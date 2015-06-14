@@ -141,3 +141,9 @@ CREATE TABLE order_coupon (
 	coupon_id VARCHAR(128) NOT NULL REFERENCES coupon(coupon_id),
 	PRIMARY KEY(order_id, coupon_id)
 );
+
+CREATE INDEX ON position(salesman);
+CREATE INDEX ON category(parent_id);
+CREATE INDEX ON product(category_id);
+CREATE INDEX ON product_stock(quantity); 
+CREATE INDEX ON "order"(salesman_id);

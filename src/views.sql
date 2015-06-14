@@ -3,20 +3,6 @@
 --
 
 ---------------------------------------------------------------
---	View showing the current prices of products (only includes
---	products with prices)
----------------------------------------------------------------
-
-CREATE OR REPLACE VIEW current_prices AS
-
-	SELECT p.* FROM product_price p JOIN 
-	(	
-		SELECT product_id, MAX(created_at) AS "newest"
-		FROM product_price GROUP BY product_id
-	) x 
-	ON p.product_id = x.product_id AND p.created_at = x.newest;
-
----------------------------------------------------------------
 --	View showing information about orders placed via internet
 ---------------------------------------------------------------
 
@@ -151,3 +137,22 @@ CREATE OR REPLACE VIEW pending_order AS
 				a.city, b.address, b.city;
 
 ---------------------------------------------------------------
+-- View that allows to sort salesmen by company income from
+-- the orders they took care of
+---------------------------------------------------------------
+
+CREATE OR REPLACE VIEW salesman_achievements AS
+	SELECT
+		e.employee_id,
+		COUNT(CASE WHEN o.created_at >= (NOW() - interval '7 days') THEN 1 ELSE NULL END) as last_7_days_cnt, 
+		SUM(CASE WHEN o.created_at >= (NOW() - interval '7 days') THEN (SELECT SUM(total_price) FROM order_products(o.order_id)) ELSE 0 END) as last_7_days_sum,
+		COUNT(CASE WHEN o.created_at >= (NOW() - interval '30 days') THEN 1 ELSE NULL END) as last_30_days_cnt, 
+		SUM(CASE WHEN o.created_at >= (NOW() - interval '30 days') THEN (SELECT SUM(total_price) FROM order_products(o.order_id)) ELSE 0 END) as last_30_days_sum,
+		COUNT(CASE WHEN o.created_at >= (NOW() - interval '1 year') THEN 1 ELSE NULL END) as last_1_year_cnt, 
+		SUM(CASE WHEN o.created_at >= (NOW() - interval '1 year') THEN (SELECT SUM(total_price) FROM order_products(o.order_id)) ELSE 0 END) as last_1_year_sum
+	FROM employee_detail e
+	LEFT JOIN "order" o ON (e.employee_id=o.salesman_id)
+	WHERE salesman=TRUE
+	GROUP BY e.employee_id
+	ORDER BY 1;
+
